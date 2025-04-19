@@ -9,10 +9,10 @@ DRF-IAM Documentation
     :target: https://drf-iam.readthedocs.io/en/latest/?badge=latest
     :alt: Documentation Status
 
-DRF-IAM (Django REST Framework - Identity and Access Management) is a powerful Django application that provides Role-Based Access Control (RBAC) for Django REST Framework applications. It allows you to easily manage permissions and roles across your API endpoints.
+A powerful Django application that provides Role-Based Access Control (RBAC) for Django REST Framework applications. Easily manage permissions and roles across your API endpoints.
 
-Key Features
------------
+Features
+--------
 
 * 🔒 Role-Based Access Control (RBAC)
 * 🎯 Custom policy names for viewsets
@@ -27,15 +27,4 @@ Contents
    :maxdepth: 2
 
    installation
-   quickstart
-   configuration
    usage
-   api
-   contributing
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
