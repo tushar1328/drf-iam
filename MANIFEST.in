@@ -1,0 +1,2 @@
+include README.md
+recursive-include drf_iam/migrations *
