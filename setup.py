@@ -15,6 +15,10 @@ setup(
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',  # Important if using Markdown
     url='https://github.com/tushar1328/drf-iam.git',  # Optional but helpful
+    project_urls={
+        'Documentation': 'https://drf-iam.readthedocs.io/en/latest/installation.html',
+        'Source': 'https://github.com/tushar1328/drf-iam.git',
+    },
     classifiers=[
         'Framework :: Django',
         'Framework :: Django :: 3.2',
