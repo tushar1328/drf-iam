@@ -1,4 +1,6 @@
 import inspect
+
+from django.template.base import kwarg_re
 from django.urls.resolvers import URLPattern, URLResolver
 from rest_framework.viewsets import ViewSetMixin
 from rest_framework.decorators import action
@@ -24,7 +26,9 @@ def get_viewset_actions(viewset_cls):
     for name, method in inspect.getmembers(viewset_cls, predicate=inspect.isfunction):
         if hasattr(method, 'mapping'):
             for http_method in method.mapping:
-                actions.add(f"{name}")
+                viewset_function = getattr(viewset_cls, name)
+                if viewset_function.get("kwargs"):
+                    actions.add(f"{name}")
 
     return actions
 
@@ -51,6 +55,9 @@ def load_permissions_from_urls(**kwargs):
     for entry in extract_viewsets_from_urlpatterns(urlpatterns):
         viewset_cls = entry['viewset']
         basename = getattr(viewset_cls,"iam_policy_name") or viewset_cls.__name__.lower().replace('viewset', '')
+        exclude_from_permissions = getattr(viewset_cls, "drf_iam_exclude_from_permissions", False)
+        if exclude_from_permissions:
+            continue
         actions = get_viewset_actions(viewset_cls)
 
         for action in actions:
