@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='drf-iam',
-    version='0.0.3',
+    version='0.1.0',
     packages=find_packages(),  # Automatically finds all sub-packages
     include_package_data=True,  # Include non-Python files from MANIFEST.in
     install_requires=[
