@@ -26,9 +26,7 @@ def get_viewset_actions(viewset_cls):
     for name, method in inspect.getmembers(viewset_cls, predicate=inspect.isfunction):
         if hasattr(method, 'mapping'):
             for http_method in method.mapping:
-                viewset_function = getattr(viewset_cls, name)
-                if viewset_function.get("kwargs"):
-                    actions.add(f"{name}")
+                actions.add(f"{name}")
 
     return actions
 
