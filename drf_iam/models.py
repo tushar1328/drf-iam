@@ -12,6 +12,7 @@ class Role(models.Model):
 
 
 class Policy(models.Model):
+    policy_name = models.CharField(max_length=255, blank=True, null=True)
     action = models.CharField(max_length=100)
     resource_type = models.CharField(max_length=100)
     description = models.TextField(blank=True)
