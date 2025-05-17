@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Set, Tuple, Iterator, Type, Optional
 from django.conf import settings
 from django.urls import get_resolver, URLPattern, URLResolver
 from rest_framework.viewsets import ViewSetMixin
+from rest_framework.views import APIView
 
 from drf_iam.models import Policy
 from .logging_utils import setup_colorful_logger
@@ -33,7 +34,11 @@ class PolicyDetail:
 
 def is_viewset(cls: Any) -> bool:
     """Checks if the given class is a DRF ViewSet."""
-    return isinstance(cls, type) and issubclass(cls, ViewSetMixin)
+    return isinstance(cls, type) and (issubclass(cls, ViewSetMixin))
+
+def is_api_view(cls: Any) -> bool:
+    """Checks if the given class is a DRF APIView."""
+    return isinstance(cls, type) and  issubclass(cls, APIView)
 
 
 def get_viewset_actions(viewset_cls: Type[ViewSetMixin]) -> Set[str]:
@@ -79,61 +84,143 @@ class PermissionLoader:
             elif isinstance(pattern, URLPattern):
                 callback = pattern.callback
                 viewset_class = getattr(callback, 'cls', None)
-                if is_viewset(viewset_class):
+                if is_viewset(viewset_class) or is_api_view(viewset_class):
                     yield {
                         'prefix': prefix,
                         'pattern': pattern.pattern,
                         'viewset': viewset_class,
                         'callback': callback,
+                        'name': pattern.name
                     }
+
+    def _validate_conflicting_definitions(
+        self,
+        action_method: Any,
+        action_name: str,
+        iam_perms_for_action: Dict[str, Any]
+    ) -> None:
+        """
+        Validates that IAM-related attributes are not defined in conflicting ways
+        (e.g., both in drf_iam_permissions dict and as a direct method attribute).
+
+        Raises:
+            Exception: If any attribute is defined in both locations.
+        """
+        conflicts: List[str] = []
+        error_message_template = (
+            "Attribute '{}' for action '{}' on ViewSet '{}' cannot be defined in both "
+            "'drf_iam_permissions' dictionary and as a direct method attribute (e.g., via decorator). "
+            "Please choose a single source of truth."
+        )
+
+        viewset_name = action_method.__self__.__class__.__name__ if hasattr(action_method, '__self__') else 'UnknownViewSet'
+
+        # Check for 'policy_name'
+        if iam_perms_for_action.get("policy_name") and hasattr(action_method, 'policy_name'):
+            conflicts.append(error_message_template.format('policy_name', action_name, viewset_name))
+
+        # Check for 'policy_description' (key 'description' in dict, attribute 'policy_description' on method)
+        if iam_perms_for_action.get("description") and hasattr(action_method, 'policy_description'):
+            conflicts.append(error_message_template.format('policy_description (dict key "description")', action_name, viewset_name))
+
+        # Check for 'exclude_from_iam'
+        if iam_perms_for_action.get("exclude_from_iam") is not None and \
+           hasattr(action_method, 'exclude_from_iam'):
+            conflicts.append(error_message_template.format('exclude_from_iam', action_name, viewset_name))
+
+        if conflicts:
+            raise Exception("\n".join(conflicts))
 
     def _generate_policy_details_from_viewsets(self) -> None:
         """Generates a list of desired PolicyDetail objects from URL patterns."""
         raw_policy_details: List[Dict[str, Any]] = []
-        for entry in self._extract_viewsets_from_urlpatterns(self.urlpatterns):
-            viewset_cls: Type[ViewSetMixin] = entry['viewset']
-            basename = getattr(viewset_cls, "iam_policy_name", None) or \
-                       viewset_cls.__name__.lower().replace('viewset', '')
+        resource_type_name_cache: Dict[Type[ViewSetMixin], str] = {}
 
-            exclude_from_permissions = getattr(viewset_cls, "drf_iam_exclude_from_permissions", False)
-            if exclude_from_permissions:
-                continue
-
+        for viewset_info in self._extract_viewsets_from_urlpatterns(self.urlpatterns):
+            viewset_cls = viewset_info['callback'].cls
             actions = get_viewset_actions(viewset_cls)
+            resource_name_from_path = viewset_info['name'] # Used if iam_resource_type_name not set
+
+            # Cache resource type name
+            if viewset_cls not in resource_type_name_cache:
+                resource_type_name_cache[viewset_cls] = getattr(
+                    viewset_cls,
+                    "iam_resource_type_name",
+                    resource_name_from_path.replace('-', '_') # Default from URL name
+                )
+            resource_type_name = resource_type_name_cache[viewset_cls]
+
+            drf_iam_permissions = getattr(viewset_cls, "drf_iam_permissions", {})
 
             for action_name in actions:
                 action_method = getattr(viewset_cls, action_name, None)
-                policy_name_override = action_name
-                description = f"Permission for {action_name} on {basename}"
+                iam_perms_for_action = drf_iam_permissions.get(action_name, {})
 
-                if action_method:
-                    if getattr(action_method, 'exclude_from_iam', False):
-                        continue
-                    policy_name_override = getattr(action_method, 'policy_name', policy_name_override)
-                    description = getattr(action_method, 'policy_description', description)
-
-                raw_policy_details.append({
-                    'action': f"{basename}:{action_name}",
-                    'resource_type': basename,
-                    'policy_name': policy_name_override,
-                    'description': description
-                })
-
-        seen_policies: Set[Tuple[str, str]] = set()
-        unique_policy_details: List[PolicyDetail] = []
-        for detail_dict in raw_policy_details:
-            key = (detail_dict['action'], detail_dict['resource_type'])
-            if key not in seen_policies:
-                seen_policies.add(key)
-                unique_policy_details.append(
-                    PolicyDetail(
-                        action=detail_dict['action'],
-                        resource_type=detail_dict['resource_type'],
-                        policy_name=detail_dict['policy_name'],
-                        description=detail_dict['description'],
+                if action_method: # Ensure the method actually exists
+                    self._validate_conflicting_definitions(
+                        action_method,
+                        action_name,
+                        iam_perms_for_action
                     )
-                )
-        self.desired_policies = unique_policy_details
+
+                # Determine if the action should be excluded
+                # Precedence: method attribute > dict setting > default (False)
+                excluded = False
+                if hasattr(action_method, 'exclude_from_iam'):
+                    excluded = getattr(action_method, 'exclude_from_iam')
+                elif "exclude_from_iam" in iam_perms_for_action:
+                    excluded = iam_perms_for_action.get("exclude_from_iam", False)
+                
+                if excluded:
+                    logger.debug(
+                        f"Action '{action_name}' on ViewSet "
+                        f"'{viewset_cls.__name__}' is excluded from IAM policies."
+                    )
+                    continue
+
+                # Determine policy_name
+                # Precedence: method attribute > dict setting > default generated name
+                policy_name_str: str
+                if hasattr(action_method, 'policy_name'):
+                    policy_name_str = getattr(action_method, 'policy_name')
+                elif "policy_name" in iam_perms_for_action:
+                    policy_name_str = iam_perms_for_action["policy_name"]
+                else:
+                    policy_name_str = f"{action_name.replace('_', ' ').title()} {resource_type_name.replace('_', ' ').title()}"
+
+                # Determine description
+                # Precedence: method attribute 'policy_description' > dict setting 'description' > default generated description
+                description_str: str
+                if hasattr(action_method, 'policy_description'):
+                    description_str = getattr(action_method, 'policy_description')
+                elif "description" in iam_perms_for_action:
+                    description_str = iam_perms_for_action["description"]
+                else:
+                    description_str = f"Allows to {action_name.replace('_', ' ')} for {resource_type_name.replace('_', ' ')}"
+                
+                raw_policy_details.append({
+                    "action": action_name, # Just the action name
+                    "resource_type": resource_type_name,
+                    "policy_name": policy_name_str,
+                    "description": description_str,
+                })
+        
+        # Remove duplicates and create PolicyDetail objects
+        # Ensures that if multiple URL patterns point to the same viewset action,
+        # we only consider one policy detail for it based on action and resource_type.
+        unique_policy_details_set = {
+            (p["action"], p["resource_type"]): p for p in raw_policy_details
+        }.values()
+
+        self.desired_policies = [
+            PolicyDetail(
+                action=p["action"],
+                resource_type=p["resource_type"],
+                policy_name=p["policy_name"],
+                description=p["description"],
+            )
+            for p in unique_policy_details_set
+        ]
 
     def _get_current_policies_from_db(self) -> None:
         """Fetches all current policies from the database."""
