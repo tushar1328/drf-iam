@@ -85,7 +85,7 @@ class PermissionLoader:
             elif isinstance(pattern, URLPattern):
                 callback = pattern.callback
                 viewset_class = getattr(callback, 'cls', None)
-                if is_viewset(viewset_class) or is_api_view(viewset_class):
+                if (is_viewset(viewset_class) or is_api_view(viewset_class)) and getattr(viewset_class,"drf_iam_enabled", True):
                     yield {
                         'prefix': prefix,
                         'pattern': pattern.pattern,
@@ -262,10 +262,10 @@ class PermissionLoader:
         to_update: List[PolicyDetail] = []
         current_map_for_update = {(p.action, p.resource_type): p for p in self.current_db_policies}
 
-        for desired_policy in desired_set & current_set:
+        for desired_policy in current_set & desired_set:
             current_policy_match = current_map_for_update.get((desired_policy.action, desired_policy.resource_type))
             if current_policy_match and (
-                    current_policy_match.policy_name != desired_policy.policy_name or \
+                    current_policy_match.policy_name != desired_policy.policy_name or
                     current_policy_match.description != desired_policy.description
             ):
                 to_update.append(PolicyDetail(
