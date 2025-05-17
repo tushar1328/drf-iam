@@ -85,7 +85,9 @@ class PermissionLoader:
             elif isinstance(pattern, URLPattern):
                 callback = pattern.callback
                 viewset_class = getattr(callback, 'cls', None)
-                if (is_viewset(viewset_class) or is_api_view(viewset_class)) and getattr(viewset_class,"drf_iam_enabled", True):
+                if (is_viewset(viewset_class) or is_api_view(viewset_class)) and getattr(viewset_class,
+                                                                                         "drf_iam_exclude_from_permissions",
+                                                                                         True):
                     yield {
                         'prefix': prefix,
                         'pattern': pattern.pattern,
